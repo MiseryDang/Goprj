@@ -44,6 +44,11 @@ type Claims struct {
 	jwt.StandardClaims
 }
 
+type TokenStore struct {
+	ID    uint   `json:"id" gorm:"primaryKey"`
+	Token string `json:"token" gorm:"unique"`
+}
+
 var movies []Movie
 
 func connectToSQLite() (*gorm.DB, error) {
@@ -97,7 +102,6 @@ func createMovie(w http.ResponseWriter, r *http.Request) {
 	movies = append(movies, movie)
 	w.WriteHeader(http.StatusCreated) // Đặt mã trạng thái là 201 (Created)
 	json.NewEncoder(w).Encode(movie)
-
 }
 
 func updateMovie(w http.ResponseWriter, r *http.Request) {
@@ -165,10 +169,62 @@ func register(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(registration)
 }
 
+// get hết
+func getUsers(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	db, err := connectToSQLite()
+	if err != nil {
+		http.Error(w, "failed to connect database", http.StatusInternalServerError)
+		return
+	}
+	var users []Registration
+	if err := db.Find(&users).Error; err != nil {
+		http.Error(w, "failed to get users", http.StatusInternalServerError)
+		return
+	}
+	json.NewEncoder(w).Encode(users)
+}
+
+// get riêng từng token
+func getUser(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	// Lấy token từ tiêu đề Authorization
+	tokenString := r.Header.Get("Authorization")
+	if tokenString == "" {
+		http.Error(w, "Thiếu Authorization", http.StatusUnauthorized)
+		return
+	}
+	// Loại bỏ tiền tố "Bearer " nếu có
+	if len(tokenString) > 7 && tokenString[:7] == "Bearer " {
+		tokenString = tokenString[7:]
+	}
+	claims := &Claims{}
+	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+		return jwtKey, nil
+	})
+	if err != nil || !token.Valid {
+		http.Error(w, "Token không hợp lệ", http.StatusUnauthorized)
+		return
+	}
+	db, err := connectToSQLite()
+	if err != nil {
+		http.Error(w, "Không thể kết nối csdl", http.StatusInternalServerError)
+		return
+	}
+	var user Registration
+	if err := db.Where("username = ?", claims.Username).First(&user).Error; err != nil {
+		http.Error(w, "user not found", http.StatusNotFound)
+		return
+	}
+	json.NewEncoder(w).Encode(user)
+}
 func login(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	var credentials Registration
-	_ = json.NewDecoder(r.Body).Decode(&credentials)
+	if err := json.NewDecoder(r.Body).Decode(&credentials); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	db, err := connectToSQLite()
 	if err != nil {
@@ -198,9 +254,20 @@ func login(w http.ResponseWriter, r *http.Request) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	tokenString, err := token.SignedString(jwtKey)
 	if err != nil {
+		log.Printf("Error generating token: %v", err)
 		http.Error(w, "failed to generate token", http.StatusInternalServerError)
 		return
 	}
+	log.Printf("Generated token: %s", tokenString)
+
+	// Lưu token vào csdl
+	tokenStore := TokenStore{Token: tokenString}
+	if err := db.Create(&tokenStore).Error; err != nil {
+		log.Printf("Error storing token: %v", err)
+		http.Error(w, "failed to store token", http.StatusInternalServerError)
+		return
+	}
+	log.Printf("Stored token: %s", tokenString)
 
 	http.SetCookie(w, &http.Cookie{
 		Name:    "token",
@@ -210,38 +277,41 @@ func login(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"token": tokenString})
 }
 
-func checkTokenExpiration(w http.ResponseWriter, r *http.Request) {
-	tokenString := r.Header.Get("Authorization")
-	if tokenString == "" {
-		http.Error(w, "Authorization header missing", http.StatusUnauthorized)
-		return
-	}
-
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		// Replace with your secret key
-		return []byte("secret-key"), nil
-	})
-
-	if err != nil {
-		http.Error(w, "Invalid token", http.StatusUnauthorized)
-		return
-	}
-
-	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-		exp := int64(claims["exp"].(float64))
-		expirationTime := time.Unix(exp, 0)
-		remainingTime := time.Until(expirationTime)
-
-		response := map[string]interface{}{
-			"expiration_time": expirationTime,
-			"remaining_time":  remainingTime.String(),
+func TokenValidChecked(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tokenString := r.Header.Get("Authorization")
+		if tokenString == "" {
+			http.Error(w, "Thiếu Authorization", http.StatusUnauthorized)
+			return
 		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
-	} else {
-		http.Error(w, "Invalid token claims", http.StatusUnauthorized)
-	}
+		claims := &Claims{}
+		token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+			return jwtKey, nil
+		})
+		if err != nil || !token.Valid {
+			log.Printf("Invalid token: %v", err)
+			http.Error(w, "Token không hợp lệ", http.StatusUnauthorized)
+			return
+		}
+		log.Printf("Validated token: %s", tokenString)
+		db, err := connectToSQLite()
+		if err != nil {
+			http.Error(w, "Không thể kết nối csdl", http.StatusInternalServerError)
+			return
+		}
+		var user Registration
+		if err := db.Where("username = ?", claims.Username).First(&user).Error; err != nil {
+			http.Error(w, "user not found", http.StatusUnauthorized)
+			return
+		}
+		// Kiểm tra token tồn tại
+		var storedToken TokenStore
+		if err := db.Where("token = ?", tokenString).First(&storedToken).Error; err != nil {
+			http.Error(w, "Token không tồn tại", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func enableCors(next http.Handler) http.Handler {
@@ -262,7 +332,7 @@ func main() {
 	if err != nil {
 		log.Fatal("failed to connect database: ", err)
 	}
-	err = db.AutoMigrate(&Movie{}, &Director{}, &Registration{})
+	err = db.AutoMigrate(&Movie{}, &Director{}, &Registration{}, &TokenStore{})
 	if err != nil {
 		log.Fatal("failed to migrate database: ", err)
 	}
@@ -271,6 +341,7 @@ func main() {
 	db.Exec("DELETE FROM movies")
 	db.Exec("DELETE FROM directors")
 	db.Exec("DELETE FROM registrations")
+	db.Exec("DELETE FROM token_stores")
 
 	// Thêm data
 	moviesToAdd := []Movie{
@@ -297,15 +368,16 @@ func main() {
 	db.Find(&movies)
 	r.HandleFunc("/movies", getMovies).Methods("GET")
 	r.HandleFunc("/movies/{id}", getMovie).Methods("GET")
-	r.HandleFunc("/movies", createMovie).Methods("POST")
-	r.HandleFunc("/movies/{id}", updateMovie).Methods("PUT")
-	r.HandleFunc("/movies/{id}", deleteMovie).Methods("DELETE")
+	r.Handle("/movies", TokenValidChecked(http.HandlerFunc(createMovie))).Methods("POST")
+	r.Handle("/movies/{id}", TokenValidChecked(http.HandlerFunc(updateMovie))).Methods("PUT")
+	r.Handle("/movies/{id}", TokenValidChecked(http.HandlerFunc(deleteMovie))).Methods("DELETE")
 	r.HandleFunc("/register", register).Methods("POST")
 	r.HandleFunc("/login", login).Methods("POST")
-	r.HandleFunc("/check-token-expiration", checkTokenExpiration).Methods("GET")
+	r.HandleFunc("/users", getUsers).Methods("GET")
+	r.HandleFunc("/usersToken", getUser).Methods("GET")
 
-	//middleware CORS
+	// Middleware cho CORS
 	http.Handle("/", enableCors(r))
-	fmt.Printf("Starting server at port 8009\n")
-	log.Fatal(http.ListenAndServe(":8009", nil))
+	fmt.Printf("Starting server at port 8012\n")
+	log.Fatal(http.ListenAndServe(":8012", nil))
 }
