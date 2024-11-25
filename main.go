@@ -22,6 +22,7 @@ type Movie struct {
 	Title      string    `json:"title"`
 	Director   *Director `json:"director"`
 	DirectorID uint      `json:"director_id" gorm:"foreignKey:DirectorID"`
+	CreatedBy  uint      `json:"created_by"`
 }
 
 type Director struct {
@@ -40,6 +41,7 @@ type Registration struct {
 var jwtKey = []byte("secret_key")
 
 type Claims struct {
+	UserID   uint   `json:"user_id"`
 	Username string `json:"username"`
 	jwt.StandardClaims
 }
@@ -97,10 +99,37 @@ func getMovie(w http.ResponseWriter, r *http.Request) {
 func createMovie(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	var movie Movie
-	_ = json.NewDecoder(r.Body).Decode(&movie)
+	if err := json.NewDecoder(r.Body).Decode(&movie); err != nil {
+		http.Error(w, "Dữ liệu đầu vào không hợp lệ", http.StatusBadRequest)
+		return
+	}
 	movie.ID = strconv.Itoa(rand.Intn(100000000))
-	movies = append(movies, movie)
-	w.WriteHeader(http.StatusCreated) // Đặt mã trạng thái là 201 (Created)
+
+	// Lấy ID người dùng từ token
+	tokenString := r.Header.Get("Authorization")
+	if len(tokenString) > 7 && tokenString[:7] == "Bearer " {
+		tokenString = tokenString[7:]
+	}
+	claims := &Claims{}
+	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+		return jwtKey, nil
+	})
+	if err != nil || !token.Valid {
+		http.Error(w, "Token không hợp lệ", http.StatusUnauthorized)
+		return
+	}
+	movie.CreatedBy = claims.UserID
+
+	db, err := connectToSQLite()
+	if err != nil {
+		http.Error(w, "Không thể kết nối cơ sở dữ liệu", http.StatusInternalServerError)
+		return
+	}
+	if err := addMovie(db, movie); err != nil {
+		http.Error(w, "Không thể thêm phim", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(movie)
 }
 
@@ -124,7 +153,6 @@ func updateMovie(w http.ResponseWriter, r *http.Request) {
 			// Trả về phim đã cập nhật dưới dạng JSON
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(movie)
-
 			return
 		}
 	}
@@ -185,6 +213,31 @@ func getUsers(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(users)
 }
 
+// kiểm tra belong
+func getMoviesByCreator(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	params := mux.Vars(r)
+	creatorID, err := strconv.Atoi(params["created_by"])
+	if err != nil {
+		http.Error(w, "Invalid creator ID", http.StatusBadRequest)
+		return
+	}
+
+	db, err := connectToSQLite()
+	if err != nil {
+		http.Error(w, "Failed to connect to database", http.StatusInternalServerError)
+		return
+	}
+
+	var movies []Movie
+	if err := db.Where("created_by = ?", creatorID).Preload("Director").Find(&movies).Error; err != nil {
+		http.Error(w, "Failed to get movies", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(movies)
+}
+
 // get riêng từng token
 func getUser(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -218,6 +271,7 @@ func getUser(w http.ResponseWriter, r *http.Request) {
 	}
 	json.NewEncoder(w).Encode(user)
 }
+
 func login(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	var credentials Registration
@@ -225,49 +279,44 @@ func login(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-
 	db, err := connectToSQLite()
 	if err != nil {
-		http.Error(w, "failed to connect database", http.StatusInternalServerError)
+		http.Error(w, "Không thể kết nối cơ sở dữ liệu", http.StatusInternalServerError)
 		return
 	}
-
 	var registration Registration
 	if err := db.Where("username = ?", credentials.Username).First(&registration).Error; err != nil {
-		http.Error(w, "user not found", http.StatusUnauthorized)
+		http.Error(w, "Không tìm thấy người dùng", http.StatusUnauthorized)
 		return
 	}
-
 	if err := bcrypt.CompareHashAndPassword([]byte(registration.Password), []byte(credentials.Password)); err != nil {
-		http.Error(w, "invalid password", http.StatusUnauthorized)
+		http.Error(w, "Mật khẩu không hợp lệ", http.StatusUnauthorized)
 		return
 	}
-
 	expirationTime := time.Now().Add(24 * time.Hour)
 	claims := &Claims{
+		UserID:   registration.ID,
 		Username: credentials.Username,
 		StandardClaims: jwt.StandardClaims{
 			ExpiresAt: expirationTime.Unix(),
 		},
 	}
-
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	tokenString, err := token.SignedString(jwtKey)
 	if err != nil {
-		log.Printf("Error generating token: %v", err)
-		http.Error(w, "failed to generate token", http.StatusInternalServerError)
+		log.Printf("Lỗi khi tạo token: %v", err)
+		http.Error(w, "Không thể tạo token", http.StatusInternalServerError)
 		return
 	}
-	log.Printf("Generated token: %s", tokenString)
-
-	// Lưu token vào csdl
+	log.Printf("Token đã tạo: %s", tokenString)
+	// Lưu token vào cơ sở dữ liệu
 	tokenStore := TokenStore{Token: tokenString}
 	if err := db.Create(&tokenStore).Error; err != nil {
-		log.Printf("Error storing token: %v", err)
-		http.Error(w, "failed to store token", http.StatusInternalServerError)
+		log.Printf("Lỗi khi lưu token: %v", err)
+		http.Error(w, "Không thể lưu token", http.StatusInternalServerError)
 		return
 	}
-	log.Printf("Stored token: %s", tokenString)
+	log.Printf("Token đã lưu: %s", tokenString)
 
 	http.SetCookie(w, &http.Cookie{
 		Name:    "token",
@@ -375,9 +424,10 @@ func main() {
 	r.HandleFunc("/login", login).Methods("POST")
 	r.HandleFunc("/users", getUsers).Methods("GET")
 	r.HandleFunc("/usersToken", getUser).Methods("GET")
+	r.HandleFunc("/movies/creator/{created_by}", getMoviesByCreator).Methods("GET")
 
 	// Middleware cho CORS
 	http.Handle("/", enableCors(r))
-	fmt.Printf("Starting server at port 8012\n")
-	log.Fatal(http.ListenAndServe(":8012", nil))
+	fmt.Printf("Starting server at port 8016\n")
+	log.Fatal(http.ListenAndServe(":8016", nil))
 }
