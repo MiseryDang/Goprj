@@ -1,12 +1,25 @@
 package utils
 
 import (
+	"log"
 	"net/http"
 
 	"github.com/MiseryDang/Goprj/go_crud/models"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
+
+var (
+	DB  *gorm.DB
+	err error
+)
+
+func InitDB() {
+	DB, err = gorm.Open(sqlite.Open("test.db"), &gorm.Config{})
+	if err != nil {
+		log.Fatal("failed to connect database: ", err)
+	}
+}
 
 var JwtKey = []byte("secret_key")
 

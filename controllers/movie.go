@@ -8,17 +8,12 @@ import (
 
 	"github.com/MiseryDang/Goprj/go_crud/models"
 	"github.com/MiseryDang/Goprj/go_crud/utils"
-
 	"github.com/dgrijalva/jwt-go"
 	"github.com/gorilla/mux"
 )
 
 func GetMovies(w http.ResponseWriter, r *http.Request) {
-	db, err := utils.ConnectToSQLite()
-	if err != nil {
-		http.Error(w, "failed to connect database", http.StatusInternalServerError)
-		return
-	}
+	db := utils.DB
 	movies, err := utils.GetAllMovies(db)
 	if err != nil {
 		http.Error(w, "failed to get movies", http.StatusInternalServerError)
@@ -30,11 +25,7 @@ func GetMovies(w http.ResponseWriter, r *http.Request) {
 func GetMovie(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	params := mux.Vars(r)
-	db, err := utils.ConnectToSQLite()
-	if err != nil {
-		http.Error(w, "failed to connect database", http.StatusInternalServerError)
-		return
-	}
+	db := utils.DB
 	var movie models.Movie
 	if err := db.Preload("Director").First(&movie, "id = ?", params["id"]).Error; err != nil {
 		http.Error(w, "Movie not found", http.StatusNotFound)
@@ -67,11 +58,7 @@ func CreateMovie(w http.ResponseWriter, r *http.Request) {
 	}
 	movie.CreatedBy = claims.UserID
 
-	db, err := utils.ConnectToSQLite()
-	if err != nil {
-		http.Error(w, "Không thể kết nối cơ sở dữ liệu", http.StatusInternalServerError)
-		return
-	}
+	db := utils.DB
 	if err := utils.AddMovie(db, movie); err != nil {
 		http.Error(w, "Không thể thêm phim", http.StatusInternalServerError)
 		return
@@ -83,11 +70,7 @@ func CreateMovie(w http.ResponseWriter, r *http.Request) {
 func UpdateMovie(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	params := mux.Vars(r)
-	db, err := utils.ConnectToSQLite()
-	if err != nil {
-		http.Error(w, "failed to connect database", http.StatusInternalServerError)
-		return
-	}
+	db := utils.DB
 	var movie models.Movie
 	if err := db.First(&movie, "id = ?", params["id"]).Error; err != nil {
 		http.Error(w, "Movie not found", http.StatusNotFound)
@@ -106,11 +89,7 @@ func UpdateMovie(w http.ResponseWriter, r *http.Request) {
 
 func DeleteMovie(w http.ResponseWriter, r *http.Request) {
 	params := mux.Vars(r)
-	db, err := utils.ConnectToSQLite()
-	if err != nil {
-		http.Error(w, "failed to connect database", http.StatusInternalServerError)
-		return
-	}
+	db := utils.DB
 	if err := db.Delete(&models.Movie{}, "id = ?", params["id"]).Error; err != nil {
 		http.Error(w, "Failed to delete movie", http.StatusInternalServerError)
 		return
@@ -127,12 +106,7 @@ func GetMoviesByCreator(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	db, err := utils.ConnectToSQLite()
-	if err != nil {
-		http.Error(w, "Failed to connect to database", http.StatusInternalServerError)
-		return
-	}
-
+	db := utils.DB
 	var movies []models.Movie
 	if err := db.Where("created_by = ?", creatorID).Preload("Director").Find(&movies).Error; err != nil {
 		http.Error(w, "Failed to get movies", http.StatusInternalServerError)

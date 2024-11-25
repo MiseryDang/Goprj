@@ -5,20 +5,17 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/MiseryDang/Goprj/go_crud/models"
 	"github.com/MiseryDang/Goprj/go_crud/routes"
 	"github.com/MiseryDang/Goprj/go_crud/utils"
-
-	"github.com/MiseryDang/Goprj/go_crud/models"
 	"github.com/gorilla/mux"
 )
 
 func main() {
-	r := mux.NewRouter()
-	db, err := utils.ConnectToSQLite()
-	if err != nil {
-		log.Fatal("failed to connect database: ", err)
-	}
-	err = db.AutoMigrate(&models.Movie{}, &models.Director{}, &models.Registration{}, &models.TokenStore{})
+	utils.InitDB()
+	db := utils.DB
+
+	err := db.AutoMigrate(&models.Movie{}, &models.Director{}, &models.Registration{}, &models.TokenStore{})
 	if err != nil {
 		log.Fatal("failed to migrate database: ", err)
 	}
@@ -51,6 +48,7 @@ func main() {
 		fmt.Printf("ID: %s, Title: %s, Director: %s %s\n", movie.ID, movie.Title, movie.Director.FirstName, movie.Director.LastName)
 	}
 
+	r := mux.NewRouter()
 	routes.RegisterRoutes(r)
 
 	// Middleware cho CORS
