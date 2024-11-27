@@ -20,22 +20,22 @@ func main() {
 		log.Fatal("failed to migrate database: ", err)
 	}
 
-	// Xóa data cũ
-	db.Exec("DELETE FROM movies")
-	db.Exec("DELETE FROM directors")
-	db.Exec("DELETE FROM registrations")
-	db.Exec("DELETE FROM token_stores")
+	// // Xóa data cũ
+	// db.Exec("DELETE FROM movies")
+	// db.Exec("DELETE FROM directors")
+	// db.Exec("DELETE FROM registrations")
+	// db.Exec("DELETE FROM token_stores")
 
-	// Thêm data
-	moviesToAdd := []models.Movie{
-		{ID: "1", Isbn: "438222", Title: "Movie One", Director: &models.Director{FirstName: "John", LastName: "Doe"}},
-		{ID: "2", Isbn: "45455", Title: "Movie Two", Director: &models.Director{FirstName: "Steve", LastName: "Smith"}},
-	}
-	for _, movie := range moviesToAdd {
-		if err := utils.AddMovie(db, movie); err != nil {
-			log.Fatal("failed to add movie: ", err)
-		}
-	}
+	// // Thêm data
+	// moviesToAdd := []models.Movie{
+	// 	{ID: "1", Isbn: "438222", Title: "Movie One", Director: &models.Director{FirstName: "John", LastName: "Doe"}},
+	// 	{ID: "2", Isbn: "45455", Title: "Movie Two", Director: &models.Director{FirstName: "Steve", LastName: "Smith"}},
+	// }
+	// for _, movie := range moviesToAdd {
+	// 	if err := utils.AddMovie(db, movie); err != nil {
+	// 		log.Fatal("failed to add movie: ", err)
+	// 	}
+	// }
 
 	// Đọc dữ liệu từ cơ sở dữ liệu
 	movies, err := utils.GetAllMovies(db)
@@ -53,6 +53,6 @@ func main() {
 
 	// Middleware cho CORS
 	http.Handle("/", utils.EnableCors(r))
-	fmt.Printf("Starting server at port 8016\n")
-	log.Fatal(http.ListenAndServe(":8016", nil))
+	fmt.Printf("Starting server at port 8019\n")
+	log.Fatal(http.ListenAndServe(":8019", nil))
 }

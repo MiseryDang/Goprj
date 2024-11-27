@@ -3,7 +3,7 @@ package models
 import "github.com/dgrijalva/jwt-go"
 
 type Movie struct {
-	ID         string    `json:"id"`
+	ID         string    `json:"id" gorm:"autoIncrement"`
 	Isbn       string    `json:"isbn"`
 	Title      string    `json:"title"`
 	Director   *Director `json:"director"`
@@ -19,7 +19,7 @@ type Director struct {
 
 type Registration struct {
 	ID       uint   `json:"id" gorm:"primaryKey"`
-	Username string `json:"username" gorm:"unique"`
+	Username string `json:"username" gorm:"unique;not null"`
 	FullName string `json:"fullname"`
 	Password string `json:"password"`
 }

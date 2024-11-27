@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"encoding/json"
+	"log"
 	"math/rand"
 	"net/http"
 	"strconv"
@@ -53,6 +54,7 @@ func CreateMovie(w http.ResponseWriter, r *http.Request) {
 		return utils.JwtKey, nil
 	})
 	if err != nil || !token.Valid {
+		log.Printf("Token không hợp lệ: %v", err)
 		http.Error(w, "Token không hợp lệ", http.StatusUnauthorized)
 		return
 	}
@@ -70,20 +72,38 @@ func CreateMovie(w http.ResponseWriter, r *http.Request) {
 func UpdateMovie(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	params := mux.Vars(r)
+	// Kết nối cơ sở dữ liệu
 	db := utils.DB
 	var movie models.Movie
+	// Tìm movie theo ID
 	if err := db.First(&movie, "id = ?", params["id"]).Error; err != nil {
 		http.Error(w, "Movie not found", http.StatusNotFound)
 		return
 	}
-	if err := json.NewDecoder(r.Body).Decode(&movie); err != nil {
+	// Decode dữ liệu từ request vào struct tạm thời
+	var updatedData models.Movie
+	if err := json.NewDecoder(r.Body).Decode(&updatedData); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	// Chỉ cập nhật các trường có giá trị mới
+	if updatedData.Title != "" {
+		movie.Title = updatedData.Title
+	}
+	if updatedData.Isbn != "" {
+		movie.Isbn = updatedData.Isbn
+	}
+	if updatedData.Director != nil {
+		movie.DirectorID = updatedData.Director.ID // Cập nhật ID của Director
+	}
+
+	// Lưu lại dữ liệu đã cập nhật
 	if err := db.Save(&movie).Error; err != nil {
 		http.Error(w, "Failed to update movie", http.StatusInternalServerError)
 		return
 	}
+
+	// Trả về đối tượng movie đã được cập nhật
 	json.NewEncoder(w).Encode(movie)
 }
 
@@ -100,16 +120,16 @@ func DeleteMovie(w http.ResponseWriter, r *http.Request) {
 func GetMoviesByCreator(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	params := mux.Vars(r)
-	creatorID, err := strconv.Atoi(params["created_by"])
+	createdBy, err := strconv.Atoi(params["created_by"])
 	if err != nil {
 		http.Error(w, "Invalid creator ID", http.StatusBadRequest)
 		return
 	}
 
-	db := utils.DB
 	var movies []models.Movie
-	if err := db.Where("created_by = ?", creatorID).Preload("Director").Find(&movies).Error; err != nil {
-		http.Error(w, "Failed to get movies", http.StatusInternalServerError)
+	db := utils.DB
+	if err := db.Where("created_by = ?", createdBy).Find(&movies).Error; err != nil {
+		http.Error(w, "Failed to retrieve movies", http.StatusInternalServerError)
 		return
 	}
 

@@ -26,11 +26,7 @@ func Register(w http.ResponseWriter, r *http.Request) {
 	}
 	registration.Password = string(hashedPassword)
 
-	db, err := utils.ConnectToSQLite()
-	if err != nil {
-		http.Error(w, "failed to connect database", http.StatusInternalServerError)
-		return
-	}
+	db := utils.DB
 	if err := db.Create(&registration).Error; err != nil {
 		http.Error(w, "failed to register user", http.StatusInternalServerError)
 		return
@@ -46,22 +42,22 @@ func Login(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	db, err := utils.ConnectToSQLite()
-	if err != nil {
-		http.Error(w, "Không thể kết nối cơ sở dữ liệu", http.StatusInternalServerError)
-		return
-	}
+
+	db := utils.DB // Sử dụng cơ sở dữ liệu test
 	var registration models.Registration
 	if err := db.Where("username = ?", credentials.Username).First(&registration).Error; err != nil {
 		http.Error(w, "Không tìm thấy người dùng", http.StatusUnauthorized)
 		return
 	}
+
 	if err := bcrypt.CompareHashAndPassword([]byte(registration.Password), []byte(credentials.Password)); err != nil {
 		http.Error(w, "Mật khẩu không hợp lệ", http.StatusUnauthorized)
 		return
 	}
+
 	expirationTime := time.Now().Add(24 * time.Hour)
-	claims := &models.Claims{UserID: registration.ID,
+	claims := &models.Claims{
+		UserID:   registration.ID,
 		Username: credentials.Username,
 		StandardClaims: jwt.StandardClaims{
 			ExpiresAt: expirationTime.Unix(),
@@ -74,7 +70,7 @@ func Login(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Không thể tạo token", http.StatusInternalServerError)
 		return
 	}
-	log.Printf("Token đã tạo: %s", tokenString)
+
 	// Lưu token vào cơ sở dữ liệu
 	tokenStore := models.TokenStore{Token: tokenString}
 	if err := db.Create(&tokenStore).Error; err != nil {
@@ -82,7 +78,6 @@ func Login(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Không thể lưu token", http.StatusInternalServerError)
 		return
 	}
-	log.Printf("Token đã lưu: %s", tokenString)
 
 	http.SetCookie(w, &http.Cookie{
 		Name:    "token",
@@ -94,11 +89,7 @@ func Login(w http.ResponseWriter, r *http.Request) {
 
 func GetUsers(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	db, err := utils.ConnectToSQLite()
-	if err != nil {
-		http.Error(w, "failed to connect database", http.StatusInternalServerError)
-		return
-	}
+	db := utils.DB // Sử dụng cơ sở dữ liệu test
 	var users []models.Registration
 	if err := db.Find(&users).Error; err != nil {
 		http.Error(w, "failed to get users", http.StatusInternalServerError)
@@ -107,15 +98,45 @@ func GetUsers(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(users)
 }
 
+//	func GetUser(w http.ResponseWriter, r *http.Request) {
+//		w.Header().Set("Content-Type", "application/json")
+//		// Lấy token từ tiêu đề Authorization
+//		tokenString := r.Header.Get("Authorization")
+//		if tokenString == "" {
+//			http.Error(w, "Thiếu Authorization", http.StatusUnauthorized)
+//			return
+//		}
+//		// Loại bỏ tiền tố "Bearer " nếu có
+//		if len(tokenString) > 7 && tokenString[:7] == "Bearer " {
+//			tokenString = tokenString[7:]
+//		}
+//		claims := &models.Claims{}
+//		token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+//			return utils.JwtKey, nil
+//		})
+//		if err != nil || !token.Valid {
+//			http.Error(w, "Token không hợp lệ", http.StatusUnauthorized)
+//			return
+//		}
+//		db, err := utils.ConnectToSQLite()
+//		if err != nil {
+//			http.Error(w, "Không thể kết nối csdl", http.StatusInternalServerError)
+//			return
+//		}
+//		var user models.Registration
+//		if err := db.Where("username = ?", claims.Username).First(&user).Error; err != nil {
+//			http.Error(w, "user not found", http.StatusNotFound)
+//			return
+//		}
+//		json.NewEncoder(w).Encode(user)
+//	}
 func GetUser(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	// Lấy token từ tiêu đề Authorization
 	tokenString := r.Header.Get("Authorization")
 	if tokenString == "" {
 		http.Error(w, "Thiếu Authorization", http.StatusUnauthorized)
 		return
 	}
-	// Loại bỏ tiền tố "Bearer " nếu có
 	if len(tokenString) > 7 && tokenString[:7] == "Bearer " {
 		tokenString = tokenString[7:]
 	}
@@ -127,11 +148,8 @@ func GetUser(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Token không hợp lệ", http.StatusUnauthorized)
 		return
 	}
-	db, err := utils.ConnectToSQLite()
-	if err != nil {
-		http.Error(w, "Không thể kết nối csdl", http.StatusInternalServerError)
-		return
-	}
+
+	db := utils.DB // Sử dụng cơ sở dữ liệu test
 	var user models.Registration
 	if err := db.Where("username = ?", claims.Username).First(&user).Error; err != nil {
 		http.Error(w, "user not found", http.StatusNotFound)
